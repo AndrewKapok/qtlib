@@ -48,33 +48,63 @@ jobs:
           perl --version
           cl.exe
 
-      - name: Download Qt source code
-        id: download_qt
+  build-core:
+    needs: prepare
+    runs-on: windows-latest
+    outputs:
+      qt_build_dir: ${{ steps.cache.outputs.cache-hit }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Cache Qt base build
+        id: cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            qt-build
+          key: qt-${{ env.QT_VERSION }}-core-${{ runner.os }}
+
+      - name: Download and build Qt core
+        if: steps.cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $qtVersion = "${{ env.QT_VERSION }}"
           
-          Write-Host "=== 开始下载 Qt $qtVersion 源代码 ==="
+          Write-Host "=== 开始下载 Qt $qtVersion 核心模块 ==="
           
           # Create build directory
           New-Item -ItemType Directory -Force -Path "qt-build" | Out-Null
           Set-Location qt-build
           
-          # Clone Qt source with all submodules
+          # Clone Qt source with qtbase submodule
           $qtRepoUrl = "https://code.qt.io/qt/qt5.git"
-          Write-Host "正在克隆 Qt 仓库并初始化所有子模块..."
-          git clone --branch v$qtVersion --single-branch --recursive $qtRepoUrl qt5
+          Write-Host "正在克隆 Qt 仓库..."
+          git clone --branch v$qtVersion --single-branch $qtRepoUrl qt5
           if ($LASTEXITCODE -ne 0) {
             Write-Error "克隆 Qt 仓库失败"
             exit 1
           }
+          
           Set-Location qt5
           
-          Write-Host "=== Qt 源代码下载完成 ==="
-          Get-Location | Write-Host
+          # Initialize only qtbase
+          Write-Host "初始化核心模块 qtbase..."
+          git submodule update --init --recursive --depth 1 qtbase
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "初始化 qtbase 失败"
+            exit 1
+          }
+          
+          Write-Host "=== 核心模块下载完成 ==="
 
       - name: Configure Qt
-        id: configure_qt
+        if: steps.cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $qtVersion = "${{ env.QT_VERSION }}"
@@ -87,8 +117,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path "../build" | Out-Null
           
           # Configure Qt with optimizations
-          # -O2: Optimization level 2
-          # -ltcg: Link-time code generation (LTO for MSVC)
           $configureArgs = @(
             "-prefix", "$(Get-Location)/../install",
             "-release",
@@ -113,19 +141,8 @@ jobs:
           
           Write-Host "=== Qt 配置完成 ==="
 
-  build-core:
-    needs: prepare
-    runs-on: windows-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
       - name: Build qtbase
+        if: steps.cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           Write-Host "=== 开始编译核心模块 qtbase ==="
@@ -195,6 +212,36 @@ jobs:
         with:
           arch: x64
 
+      - name: Restore Qt core build cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            qt-build
+          key: qt-${{ env.QT_VERSION }}-core-${{ runner.os }}
+
+      - name: Update submodules for module group
+        shell: pwsh
+        run: |
+          $qtVersion = "${{ env.QT_VERSION }}"
+          $groupName = "${{ matrix.module_group.name }}"
+          $modules = @(${{ toJson(matrix.module_group.modules) }})
+          
+          Write-Host "=== 开始更新 $groupName 模块组所需代码 ==="
+          
+          Set-Location qt-build/qt5
+          
+          # Initialize required modules for this group
+          foreach ($module in $modules) {
+            Write-Host "初始化模块: $module"
+            git submodule update --init --recursive --depth 1 $module
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "初始化模块 $module 失败"
+              exit 1
+            }
+          }
+          
+          Write-Host "=== $groupName 模块组代码更新完成 ==="
+
       - name: Build module group ${{ matrix.module_group.name }}
         shell: pwsh
         run: |
@@ -230,8 +277,33 @@ jobs:
         with:
           arch: x64
 
+      - name: Restore Qt core build cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            qt-build
+          key: qt-${{ env.QT_VERSION }}-core-${{ runner.os }}
+
+      - name: Download complete Qt source code
+        shell: pwsh
+        run: |
+          $qtVersion = "${{ env.QT_VERSION }}"
+          
+          Write-Host "=== 开始下载完整的 Qt $qtVersion 源代码 ==="
+          
+          Set-Location qt-build/qt5
+          
+          # Initialize all submodules
+          Write-Host "初始化所有子模块..."
+          git submodule update --init --recursive
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "初始化子模块失败"
+            exit 1
+          }
+          
+          Write-Host "=== 完整源代码下载完成 ==="
+
       - name: Install Qt
-        id: install_qt
         shell: pwsh
         run: |
           Write-Host "=== 开始安装 Qt ==="
@@ -248,7 +320,6 @@ jobs:
           Write-Host "=== Qt 安装完成 ==="
 
       - name: Collect .lib files
-        id: collect_libs
         shell: pwsh
         run: |
           Write-Host "=== 开始收集 .lib 文件 ==="
