@@ -52,7 +52,8 @@ jobs:
     needs: prepare
     runs-on: windows-latest
     outputs:
-      qt_build_dir: ${{ steps.cache.outputs.cache-hit }}
+      cache_hit: ${{ steps.cache.outputs.cache-hit }}
+      qt_build_dir: qt-build
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
