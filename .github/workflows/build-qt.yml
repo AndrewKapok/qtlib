@@ -233,14 +233,13 @@ jobs:
           Write-Host "=== .lib 文件收集完成 ==="
           Write-Host "输出目录: $(Resolve-Path $outputDir)"
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v2
+      - name: GH Release
+        uses: softprops/action-gh-release@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: qt-${{ env.QT_VERSION }}-${{ github.run_number }}
-          release_name: Qt ${{ env.QT_VERSION }} Windows Libraries
+          name: Qt ${{ env.QT_VERSION }} Windows Libraries
           body: |
             ## Qt ${{ env.QT_VERSION }} Windows 编译库
             
@@ -261,39 +260,9 @@ jobs:
             详见附件中的库文件列表。
           draft: false
           prerelease: false
-
-      - name: Upload .lib files to Release
-        shell: pwsh
-        run: |
-          $outputDir = "qt-libs"
-          $libFiles = Get-ChildItem -Path $outputDir -Filter "*.lib"
-          
-          Write-Host "正在上传 $($libFiles.Count) 个 .lib 文件到 Release..."
-          
-          foreach ($lib in $libFiles) {
-            Write-Host "上传: $($lib.Name)"
-            
-            $uploadUrl = "${{ steps.create_release.outputs.upload_url }}"
-            $uploadUrl = $uploadUrl -replace "\{.*\}", "?name=$($lib.Name)"
-            
-            $headers = @{
-              "Authorization" = "token ${{ secrets.GITHUB_TOKEN }}"
-              "Content-Type" = "application/octet-stream"
-            }
-            
-            Invoke-RestMethod -Uri $uploadUrl -Method POST -Headers $headers -InFile $lib.FullName
-          }
-          
-          # Upload lib list file
-          $listFile = "$outputDir/lib-list.txt"
-          if (Test-Path $listFile) {
-            $uploadUrl = "${{ steps.create_release.outputs.upload_url }}"
-            $uploadUrl = $uploadUrl -replace "\{.*\}", "?name=lib-list.txt"
-            
-            Invoke-RestMethod -Uri $uploadUrl -Method POST -Headers $headers -InFile $listFile
-          }
-          
-          Write-Host "=== 所有文件上传完成 ==="
+          files: |
+            qt-libs/*.lib
+            qt-libs/lib-list.txt
 
       - name: Error handling and cleanup
         if: failure()
