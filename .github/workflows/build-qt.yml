@@ -186,7 +186,7 @@ jobs:
           - name: sql
             modules: ["qtsql"]
           - name: xml
-            modules: ["qtxml", "qtxmlpatterns"]
+            modules: ["qtxmlpatterns"]
           - name: core-addons
             modules: ["qtconcurrent", "qtcore5compat"]
           - name: network-addons
