@@ -1,0 +1,321 @@
+name: Build Qt from Source
+
+on:
+  workflow_dispatch:
+    inputs:
+      qt_version:
+        description: 'Qt版本号（必填，例如：6.6.2）'
+        required: true
+        type: string
+      submodules:
+        description: '需要编译的子模块列表（可选，用逗号分隔，如：qtbase,qtdeclarative；留空则编译全部子模块）'
+        required: false
+        type: string
+        default: ''
+
+env:
+  QT_VERSION: ${{ github.event.inputs.qt_version }}
+  SUBMODULES: ${{ github.event.inputs.submodules }}
+
+jobs:
+  build-qt:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.38'
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          # Install required tools
+          choco install -y ninja
+          choco install -y cmake
+          
+          # Verify installations
+          Write-Host "=== Checking installed tools ==="
+          cmake --version
+          ninja --version
+          python --version
+          perl --version
+          cl.exe
+
+      - name: Parse submodules input
+        id: parse_submodules
+        shell: pwsh
+        run: |
+          $submodules = "${{ env.SUBMODULES }}".Trim()
+          if ([string]::IsNullOrWhiteSpace($submodules)) {
+            Write-Host "未指定子模块，将编译全部子模块"
+            echo "has_submodules=false" >> $env:GITHUB_OUTPUT
+            echo "submodule_list=" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "指定的子模块: $submodules"
+            echo "has_submodules=true" >> $env:GITHUB_OUTPUT
+            echo "submodule_list=$submodules" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Download Qt source code
+        id: download_qt
+        shell: pwsh
+        run: |
+          $qtVersion = "${{ env.QT_VERSION }}"
+          $submodules = "${{ steps.parse_submodules.outputs.submodule_list }}"
+          $hasSubmodules = "${{ steps.parse_submodules.outputs.has_submodules }}"
+          
+          Write-Host "=== 开始下载 Qt $qtVersion 源代码 ==="
+          
+          # Create build directory
+          New-Item -ItemType Directory -Force -Path "qt-build" | Out-Null
+          Set-Location qt-build
+          
+          # Clone Qt source
+          $qtRepoUrl = "https://code.qt.io/qt/qt5.git"
+          if ($hasSubmodules -eq "true") {
+            # Clone with specific submodules
+            Write-Host "正在克隆 Qt 仓库并初始化指定子模块..."
+            git clone --branch v$qtVersion --single-branch $qtRepoUrl qt5
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "克隆 Qt 仓库失败"
+              exit 1
+            }
+            
+            Set-Location qt5
+            
+            # Initialize only specified submodules
+            $submoduleArray = $submodules -split ',' | ForEach-Object { $_.Trim() }
+            foreach ($submod in $submoduleArray) {
+              Write-Host "初始化子模块: $submod"
+              git submodule update --init --recursive --depth 1 $submod
+              if ($LASTEXITCODE -ne 0) {
+                Write-Error "初始化子模块 $submod 失败"
+                exit 1
+              }
+            }
+          } else {
+            # Clone with all submodules
+            Write-Host "正在克隆 Qt 仓库并初始化所有子模块..."
+            git clone --branch v$qtVersion --single-branch --recursive $qtRepoUrl qt5
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "克隆 Qt 仓库失败"
+              exit 1
+            }
+            Set-Location qt5
+          }
+          
+          Write-Host "=== Qt 源代码下载完成 ==="
+          Get-Location | Write-Host
+
+      - name: Configure and Build Qt
+        id: configure_build_qt
+        shell: pwsh
+        run: |
+          $qtVersion = "${{ env.QT_VERSION }}"
+          
+          Write-Host "=== 开始配置 Qt 编译 ==="
+          
+          Set-Location qt-build/qt5
+          
+          # Create build directory
+          New-Item -ItemType Directory -Force -Path "../build" | Out-Null
+          
+          # Configure Qt with optimizations
+          # -O2: Optimization level 2
+          # -ltcg: Link-time code generation (LTO for MSVC)
+          $configureArgs = @(
+            "-prefix", "$(Get-Location)/../install",
+            "-release",
+            "-optimize-size",
+            "-ltcg",
+            "-platform", "win32-msvc",
+            "-nomake", "examples",
+            "-nomake", "tests",
+            "-skip", "qtwebengine",
+            "-opensource",
+            "-confirm-license"
+          )
+          
+          Write-Host "配置参数: $configureArgs"
+          
+          # Run configure
+          & ./configure @configureArgs
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Qt 配置失败"
+            exit 1
+          }
+          
+          Write-Host "=== Qt 配置完成，开始编译 ==="
+          
+          # Build using ninja (generated by configure script)
+          ninja -j $env:NUMBER_OF_PROCESSORS
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Qt 编译失败"
+            exit 1
+          }
+          
+          Write-Host "=== Qt 编译完成 ==="
+
+      - name: Install Qt
+        id: install_qt
+        shell: pwsh
+        run: |
+          Write-Host "=== 开始安装 Qt ==="
+          
+          Set-Location qt-build/qt5
+          
+          ninja install
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Qt 安装失败"
+            exit 1
+          }
+          
+          Write-Host "=== Qt 安装完成 ==="
+
+      - name: Collect .lib files
+        id: collect_libs
+        shell: pwsh
+        run: |
+          Write-Host "=== 开始收集 .lib 文件 ==="
+          
+          $installDir = "qt-build/install"
+          $outputDir = "qt-libs"
+          
+          New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+          
+          # Find all .lib files
+          $libFiles = Get-ChildItem -Path $installDir -Recurse -Filter "*.lib" -ErrorAction SilentlyContinue
+          
+          if ($libFiles.Count -eq 0) {
+            Write-Error "未找到任何 .lib 文件"
+            exit 1
+          }
+          
+          Write-Host "找到 $($libFiles.Count) 个 .lib 文件"
+          
+          # Copy all .lib files to output directory with original names
+          foreach ($lib in $libFiles) {
+            $destPath = Join-Path $outputDir $lib.Name
+            # Handle duplicate names by adding a counter
+            $counter = 1
+            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($lib.Name)
+            $extension = $lib.Extension
+            while (Test-Path $destPath) {
+              $newName = "${baseName}_${counter}${extension}"
+              $destPath = Join-Path $outputDir $newName
+              $counter++
+            }
+            Copy-Item $lib.FullName $destPath
+            Write-Host "已复制: $($lib.FullName) -> $destPath"
+          }
+          
+          # Create a list of all lib files
+          $libList = Get-ChildItem -Path $outputDir -Filter "*.lib" | Select-Object -ExpandProperty Name
+          $libList -join "`n" | Out-File -FilePath "$outputDir/lib-list.txt" -Encoding UTF8
+          
+          Write-Host "=== .lib 文件收集完成 ==="
+          Write-Host "输出目录: $(Resolve-Path $outputDir)"
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: qt-${{ env.QT_VERSION }}-${{ github.run_number }}
+          release_name: Qt ${{ env.QT_VERSION }} Windows Libraries
+          body: |
+            ## Qt ${{ env.QT_VERSION }} Windows 编译库
+            
+            **编译日期:** ${{ github.event.head_commit.timestamp }}
+            
+            **包含的子模块:**
+            ${{ steps.parse_submodules.outputs.has_submodules == 'true' && steps.parse_submodules.outputs.submodule_list || '全部子模块' }}
+            
+            **编译配置:**
+            - 优化级别: -O2 (优化大小)
+            - 链接时优化: LTCG 已启用
+            - 平台: Windows x64
+            - 编译器: MSVC
+            
+            **包含文件:**
+            所有编译生成的 .lib 文件（静态库）
+            
+            详见附件中的库文件列表。
+          draft: false
+          prerelease: false
+
+      - name: Upload .lib files to Release
+        shell: pwsh
+        run: |
+          $outputDir = "qt-libs"
+          $libFiles = Get-ChildItem -Path $outputDir -Filter "*.lib"
+          
+          Write-Host "正在上传 $($libFiles.Count) 个 .lib 文件到 Release..."
+          
+          foreach ($lib in $libFiles) {
+            Write-Host "上传: $($lib.Name)"
+            
+            $uploadUrl = "${{ steps.create_release.outputs.upload_url }}"
+            $uploadUrl = $uploadUrl -replace "\{.*\}", "?name=$($lib.Name)"
+            
+            $headers = @{
+              "Authorization" = "token ${{ secrets.GITHUB_TOKEN }}"
+              "Content-Type" = "application/octet-stream"
+            }
+            
+            Invoke-RestMethod -Uri $uploadUrl -Method POST -Headers $headers -InFile $lib.FullName
+          }
+          
+          # Upload lib list file
+          $listFile = "$outputDir/lib-list.txt"
+          if (Test-Path $listFile) {
+            $uploadUrl = "${{ steps.create_release.outputs.upload_url }}"
+            $uploadUrl = $uploadUrl -replace "\{.*\}", "?name=lib-list.txt"
+            
+            Invoke-RestMethod -Uri $uploadUrl -Method POST -Headers $headers -InFile $listFile
+          }
+          
+          Write-Host "=== 所有文件上传完成 ==="
+
+      - name: Error handling and cleanup
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Host "=== 工作流执行失败 ==="
+          Write-Host "错误步骤: ${{ github.job }}"
+          
+          # Output error information
+          if (Test-Path "qt-build/qt5") {
+            Write-Host "Qt 源代码目录存在"
+          } else {
+            Write-Host "Qt 源代码目录不存在 - 下载可能失败"
+          }
+          
+          if (Test-Path "qt-build/build") {
+            Write-Host "编译目录存在"
+            Set-Location qt-build/build
+            if (Test-Path "CMakeFiles/CMakeError.log") {
+              Write-Host "=== CMake 错误日志 ==="
+              Get-Content "CMakeFiles/CMakeError.log" -Tail 50
+            }
+          }
+          
+          exit 1
