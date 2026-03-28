@@ -7,9 +7,18 @@ on:
         description: 'Qt版本号（必填，例如：6.6.2）'
         required: true
         type: string
+  push:
+    branches:
+      - main
+    inputs:
+      qt_version:
+        description: 'Qt版本号（必填，例如：6.6.2）'
+        required: true
+        type: string
+        default: '6.10.2'
 
 env:
-  QT_VERSION: ${{ github.event.inputs.qt_version }}
+  QT_VERSION: ${{ github.event.inputs.qt_version || '6.10.2' }}
 
 jobs:
   prepare:
@@ -225,7 +234,7 @@ jobs:
         run: |
           $qtVersion = "${{ env.QT_VERSION }}"
           $groupName = "${{ matrix.module_group.name }}"
-          $modules = @(${{ toJson(matrix.module_group.modules) }})
+          $modules = @('${{ join(matrix.module_group.modules, "','" }}')
           
           Write-Host "=== 开始更新 $groupName 模块组所需代码 ==="
           
@@ -247,7 +256,7 @@ jobs:
         shell: pwsh
         run: |
           $groupName = "${{ matrix.module_group.name }}"
-          $modules = @(${{ toJson(matrix.module_group.modules) }})
+          $modules = @('${{ join(matrix.module_group.modules, "','" }}')
           
           Write-Host "=== 开始编译模块组: $groupName ==="
           Write-Host "模块: $($modules -join ', ' )"
