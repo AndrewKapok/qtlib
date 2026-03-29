@@ -177,30 +177,24 @@ jobs:
         module_group:
           - name: essential
             modules: ["qtdeclarative", "qtnetworkauth", "qtwebsockets"]
-          - name: gui
-            modules: ["qtgui", "qtwidgets", "qtprintsupport"]
-          - name: network
-            modules: ["qtnetwork", "qtserialport", "qtserialbus"]
           - name: multimedia
-            modules: ["qtmultimedia", "qtmultimediawidgets"]
-          - name: sql
-            modules: ["qtsql"]
+            modules: ["qtmultimedia"]
           - name: xml
             modules: ["qtxmlpatterns"]
           - name: core-addons
-            modules: ["qtconcurrent", "qtcore5compat"]
+            modules: ["qt5compat"]
           - name: network-addons
             modules: ["qtnfc", "qtpositioning", "qtlocation"]
           - name: gui-addons
-            modules: ["qtdatavisualization", "qtcharts"]
+            modules: ["qtcharts"]
           - name: utility
-            modules: ["qttools", "qtwinextras"]
+            modules: ["qttools"]
           - name: web
             modules: ["qtwebchannel", "qtwebengine", "qtwebview"]
           - name: quick
-            modules: ["qtquickcontrols2", "qtquicktimeline"]
+            modules: ["qtquicktimeline"]
           - name: 3d
-            modules: ["qt3d"]
+            modules: ["qt3d", "qtquick3d", "qtquick3dphysics"]
           - name: serialization
             modules: ["qtremoteobjects", "qtscxml"]
           - name: virtual-keyboard
@@ -211,8 +205,16 @@ jobs:
             modules: ["qtsensors"]
           - name: speech
             modules: ["qtspeech"]
+          - name: connectivity
+            modules: ["qtconnectivity", "qtcoap", "qtmqtt", "qtopcua"]
+          - name: graphics
+            modules: ["qtgraphs", "qtlottie", "qtdatavis3d"]
+          - name: server
+            modules: ["qthttpserver", "qtgrpc"]
+          - name: formats
+            modules: ["qtimageformats", "qtshadertools"]
           - name: other
-            modules: ["qttranslations", "qtsvg"]
+            modules: ["qttranslations", "qtsvg", "qtactiveqt", "qtgamepad", "qtfeedback"]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
