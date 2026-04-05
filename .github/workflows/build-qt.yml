@@ -45,12 +45,6 @@ jobs:
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
-      - name: 上传 Qt 源码
-        uses: actions/upload-artifact@v4
-        with:
-          name: qt-src
-          path: qt-src
-
       - name: 上传基础库
         uses: actions/upload-artifact@v4
         with:
@@ -67,8 +61,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: qt-base, path: D:\Qt\base }
-      - uses: actions/download-artifact@v4
-        with: { name: qt-src, path: qt-src }
+      - name: 安装 Python & aqtinstall
+        run: |
+          python -m pip install -U pip
+          pip install aqtinstall
+      - name: 下载所需 Qt 模块源码
+        run: |
+          aqt install-src --outputdir . windows desktop 6.10.3 --archives qtsvg qttools qt5compat qtserialport
+          move 6.10.3\Src qt-src
       - run: choco install ninja jom strawberryperl -y
 
       - name: 设置 MSVC 环境
@@ -80,7 +80,7 @@ jobs:
           set PATH=D:\Qt\base\bin;%PATH%
           cd qt-src\qtsvg
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
@@ -90,7 +90,7 @@ jobs:
           set PATH=D:\Qt\base\bin;%PATH%
           cd qt-src\qttools
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
@@ -100,7 +100,7 @@ jobs:
           set PATH=D:\Qt\base\bin;%PATH%
           cd qt-src\qt5compat
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
@@ -110,7 +110,7 @@ jobs:
           set PATH=D:\Qt\base\bin;%PATH%
           cd qt-src\qtserialport
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
@@ -127,8 +127,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: qt-base, path: D:\Qt\base }
-      - uses: actions/download-artifact@v4
-        with: { name: qt-src, path: qt-src }
+      - name: 安装 Python & aqtinstall
+        run: |
+          python -m pip install -U pip
+          pip install aqtinstall
+      - name: 下载所需 Qt 模块源码
+        run: |
+          aqt install-src --outputdir . windows desktop 6.10.3 --archives qtimageformats qtnetworkauth qtmqtt qttranslations
+          move 6.10.3\Src qt-src
       - run: choco install ninja jom strawberryperl -y
 
       - name: 设置 MSVC 环境
@@ -140,7 +146,7 @@ jobs:
           set PATH=D:\Qt\base\bin;%PATH%
           cd qt-src\qtimageformats
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
@@ -150,7 +156,7 @@ jobs:
           set PATH=D:\Qt\base\bin;%PATH%
           cd qt-src\qtnetworkauth
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
@@ -160,7 +166,7 @@ jobs:
           set PATH=D:\Qt\base\bin;%PATH%
           cd qt-src\qtmqtt
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
@@ -170,7 +176,7 @@ jobs:
           set PATH=D:\Qt\base\bin;%PATH%
           cd qt-src\qttranslations
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
@@ -189,8 +195,14 @@ jobs:
         with: { name: qt-base, path: D:\Qt\base }
       - uses: actions/download-artifact@v4
         with: { name: qt-layer1a, path: D:\Qt\layer1a }
-      - uses: actions/download-artifact@v4
-        with: { name: qt-src, path: qt-src }
+      - name: 安装 Python & aqtinstall
+        run: |
+          python -m pip install -U pip
+          pip install aqtinstall
+      - name: 下载所需 Qt 模块源码
+        run: |
+          aqt install-src --outputdir . windows desktop 6.10.3 --archives qtdeclarative qtquickcontrols2 qtmultimedia qtwebsockets qtwebchannel
+          move 6.10.3\Src qt-src
       - run: choco install ninja jom strawberryperl -y
 
       - name: 设置 MSVC 环境
@@ -202,47 +214,47 @@ jobs:
           set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
           cd qt-src\qtdeclarative
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
       - name: 编译 qtquickcontrols2
         shell: cmd
         run: |
-          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
+          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
           cd qt-src\qtquickcontrols2
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
       - name: 编译 qtmultimedia
         shell: cmd
         run: |
-          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
+          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
           cd qt-src\qtmultimedia
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
       - name: 编译 qtwebsockets
         shell: cmd
         run: |
-          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
+          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
           cd qt-src\qtwebsockets
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
       - name: 编译 qtwebchannel
         shell: cmd
         run: |
-          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
+          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
           cd qt-src\qtwebchannel
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
@@ -263,8 +275,14 @@ jobs:
         with: { name: qt-layer1a, path: D:\Qt\layer1a }
       - uses: actions/download-artifact@v4
         with: { name: qt-layer2, path: D:\Qt\layer2 }
-      - uses: actions/download-artifact@v4
-        with: { name: qt-src, path: qt-src }
+      - name: 安装 Python & aqtinstall
+        run: |
+          python -m pip install -U pip
+          pip install aqtinstall
+      - name: 下载 WebEngine 源码
+        run: |
+          aqt install-src --outputdir . windows desktop 6.10.3 --archives qtwebengine
+          move 6.10.3\Src qt-src
       - run: choco install ninja jom strawberryperl -y
 
       - name: 设置 MSVC 环境
@@ -276,7 +294,7 @@ jobs:
           set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
           cd qt-src\qtwebengine
           mkdir build && cd build
-          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\webengine -DBUILD_SHARED_LIBS=OFF
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\webengine -DBUILD_SHARED_LIBS=OFF
           cmake --build . --parallel %NUMBER_OF_PROCESSORS%
           cmake --install .
 
