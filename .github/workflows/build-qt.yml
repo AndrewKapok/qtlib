@@ -27,25 +27,23 @@ jobs:
       - name: 设置 MSVC 环境
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: 配置 qtbase (静态 .lib)
+      - name: 配置并编译 qtbase (静态 .lib)
         shell: cmd
         run: |
-          cd qt-src
+          cd qt-src\qtbase
           mkdir build && cd build
-          ..\configure.bat ^
-            -static -static-runtime -release ^
-            -prefix D:\Qt\base ^
-            -opensource -confirm-license ^
-            -nomake examples -nomake tests ^
-            -skip qtwayland -skip qtdoc -skip qtdocgallery ^
-            -make qtbase
-
-      - name: 最高线程编译
-        shell: cmd
-        run: |
-          cd qt-src\build
-          jom -j %NUMBER_OF_PROCESSORS%
-          jom install
+          cmake .. -G "Ninja" ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_INSTALL_PREFIX=D:\Qt\base ^
+            -DBUILD_SHARED_LIBS=OFF ^
+            -DFEATURE_static_runtime=ON ^
+            -DFEATURE_optimize_size=OFF ^
+            -DFEATURE_examples=OFF ^
+            -DFEATURE_tests=OFF ^
+            -DQT_BUILD_EXAMPLES=OFF ^
+            -DQT_BUILD_TESTS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
 
       - name: 上传 Qt 源码
         uses: actions/upload-artifact@v4
@@ -76,18 +74,45 @@ jobs:
       - name: 设置 MSVC 环境
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: 编译模块
+      - name: 编译 qtsvg
         shell: cmd
         run: |
           set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src && mkdir build && cd build
-          ..\configure.bat -static -static-runtime -release -prefix D:\Qt\layer1a
-          jom -j %NUMBER_OF_PROCESSORS% ^
-            module-qtsvg ^
-            module-qttools ^
-            module-qt5compat ^
-            module-qtserialport
-          jom install
+          cd qt-src\qtsvg
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
+
+      - name: 编译 qttools
+        shell: cmd
+        run: |
+          set PATH=D:\Qt\base\bin;%PATH%
+          cd qt-src\qttools
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
+
+      - name: 编译 qt5compat
+        shell: cmd
+        run: |
+          set PATH=D:\Qt\base\bin;%PATH%
+          cd qt-src\qt5compat
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
+
+      - name: 编译 qtserialport
+        shell: cmd
+        run: |
+          set PATH=D:\Qt\base\bin;%PATH%
+          cd qt-src\qtserialport
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
 
       - uses: actions/upload-artifact@v4
         with: { name: qt-layer1a, path: D:\Qt\layer1a }
@@ -109,18 +134,45 @@ jobs:
       - name: 设置 MSVC 环境
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: 编译模块
+      - name: 编译 qtimageformats
         shell: cmd
         run: |
           set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src && mkdir build && cd build
-          ..\configure.bat -static -static-runtime -release -prefix D:\Qt\layer1b
-          jom -j %NUMBER_OF_PROCESSORS% ^
-            module-qtimageformats ^
-            module-qtnetworkauth ^
-            module-qtmqtt ^
-            module-qttranslations
-          jom install
+          cd qt-src\qtimageformats
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
+
+      - name: 编译 qtnetworkauth
+        shell: cmd
+        run: |
+          set PATH=D:\Qt\base\bin;%PATH%
+          cd qt-src\qtnetworkauth
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
+
+      - name: 编译 qtmqtt
+        shell: cmd
+        run: |
+          set PATH=D:\Qt\base\bin;%PATH%
+          cd qt-src\qtmqtt
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
+
+      - name: 编译 qttranslations
+        shell: cmd
+        run: |
+          set PATH=D:\Qt\base\bin;%PATH%
+          cd qt-src\qttranslations
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
 
       - uses: actions/upload-artifact@v4
         with: { name: qt-layer1b, path: D:\Qt\layer1b }
@@ -136,25 +188,63 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: qt-base, path: D:\Qt\base }
       - uses: actions/download-artifact@v4
+        with: { name: qt-layer1a, path: D:\Qt\layer1a }
+      - uses: actions/download-artifact@v4
         with: { name: qt-src, path: qt-src }
       - run: choco install ninja jom strawberryperl -y
 
       - name: 设置 MSVC 环境
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: 编译层2模块
+      - name: 编译 qtdeclarative
         shell: cmd
         run: |
-          set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src && mkdir build && cd build
-          ..\configure.bat -static -static-runtime -release -prefix D:\Qt\layer2
-          jom -j %NUMBER_OF_PROCESSORS% ^
-            module-qtdeclarative ^
-            module-qtquickcontrols2 ^
-            module-qtmultimedia ^
-            module-qtwebsockets ^
-            module-qtwebchannel
-          jom install
+          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
+          cd qt-src\qtdeclarative
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
+
+      - name: 编译 qtquickcontrols2
+        shell: cmd
+        run: |
+          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
+          cd qt-src\qtquickcontrols2
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
+
+      - name: 编译 qtmultimedia
+        shell: cmd
+        run: |
+          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
+          cd qt-src\qtmultimedia
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
+
+      - name: 编译 qtwebsockets
+        shell: cmd
+        run: |
+          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
+          cd qt-src\qtwebsockets
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
+
+      - name: 编译 qtwebchannel
+        shell: cmd
+        run: |
+          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
+          cd qt-src\qtwebchannel
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
 
       - uses: actions/upload-artifact@v4
         with: { name: qt-layer2, path: D:\Qt\layer2 }
@@ -170,6 +260,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: qt-base, path: D:\Qt\base }
       - uses: actions/download-artifact@v4
+        with: { name: qt-layer1a, path: D:\Qt\layer1a }
+      - uses: actions/download-artifact@v4
+        with: { name: qt-layer2, path: D:\Qt\layer2 }
+      - uses: actions/download-artifact@v4
         with: { name: qt-src, path: qt-src }
       - run: choco install ninja jom strawberryperl -y
 
@@ -179,11 +273,12 @@ jobs:
       - name: 编译 WebEngine
         shell: cmd
         run: |
-          set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src && mkdir build && cd build
-          ..\configure.bat -static -static-runtime -release -prefix D:\Qt\webengine
-          jom -j %NUMBER_OF_PROCESSORS% module-qtwebengine
-          jom install
+          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
+          cd qt-src\qtwebengine
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\webengine -DBUILD_SHARED_LIBS=OFF
+          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
+          cmake --install .
 
       - uses: actions/upload-artifact@v4
         with: { name: qt-webengine, path: D:\Qt\webengine }
