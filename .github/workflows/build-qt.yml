@@ -18,7 +18,7 @@ jobs:
 
       - name: 自动下载 Qt 源码
         run: |
-          aqt download-src 6.10.3 windows desktop
+          aqt install-src --outputdir . 6.10.3 windows desktop
           ren qt-everywhere-src-* qt-src
 
       - name: 安装依赖
