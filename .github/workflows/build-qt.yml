@@ -41,9 +41,17 @@ jobs:
             -DFEATURE_examples=OFF ^
             -DFEATURE_tests=OFF ^
             -DQT_BUILD_EXAMPLES=OFF ^
-            -DQT_BUILD_TESTS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
+            -DQT_BUILD_TESTS=OFF ^
+            -DFEATURE_pdf=OFF ^
+            -DFEATURE_printsupport=OFF ^
+            -DFEATURE_system_zlib=OFF ^
+            -DFEATURE_system_pcre2=OFF ^
+            -DFEATURE_system_png=OFF ^
+            -DFEATURE_system_harfbuzz=OFF ^
+            -DFEATURE_system_freetype=OFF ^
+            -DQT_FEATURE_pdf=OFF
+          ninja -j %NUMBER_OF_PROCESSORS%
+          ninja install
 
       - name: 上传基础库
         uses: actions/upload-artifact@v4
