@@ -1,447 +1,217 @@
-name: Build Qt from Source
+name: Qt 6.10.3 全模块静态编译(多Runner并行+WebEngine)
 
 on:
   workflow_dispatch:
-    inputs:
-      qt_version:
-        description: 'Qt版本号（必填，例如：6.6.2）'
-        required: true
-        type: string
-  push:
-    branches:
-      - main
-    inputs:
-      qt_version:
-        description: 'Qt版本号（必填，例如：6.6.2）'
-        required: true
-        type: string
-        default: '6.10.2'
-
-env:
-  QT_VERSION: ${{ github.event.inputs.qt_version || '6.10.2' }}
 
 jobs:
-  prepare:
+  # ==========================
+  # 层0：必须最先编译 qtbase
+  # ==========================
+  build-qtbase:
     runs-on: windows-latest
+    name: Layer 0 - qtbase
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: 安装 Python & aqtinstall
+        run: |
+          python -m pip install -U pip
+          pip install aqtinstall
 
-      - name: Setup MSVC environment
+      - name: 自动下载 Qt 源码
+        run: |
+          aqt download-src 6.10.3 windows desktop
+          ren qt-everywhere-src-* qt-src
+
+      - name: 安装依赖
+        run: choco install ninja jom strawberryperl -y
+
+      - name: 设置 MSVC 环境
         uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Setup Perl
-        uses: shogo82148/actions-setup-perl@v1
-        with:
-          perl-version: '5.38'
-
-      - name: Install dependencies
-        shell: pwsh
+      - name: 配置 qtbase (静态 .lib)
+        shell: cmd
         run: |
-          # Install required tools
-          choco install -y ninja
-          choco install -y cmake
-          
-          # Verify installations
-          Write-Host "=== Checking installed tools ==="
-          cmake --version
-          ninja --version
-          python --version
-          perl --version
-          cl.exe
+          cd qt-src
+          mkdir build && cd build
+          ..\configure.bat ^
+            -static -static-runtime -release ^
+            -prefix D:\Qt\base ^
+            -opensource -confirm-license ^
+            -nomake examples -nomake tests ^
+            -skip qtwayland -skip qtdoc -skip qtdocgallery ^
+            -make qtbase
 
-  build-core:
-    needs: prepare
+      - name: 最高线程编译
+        shell: cmd
+        run: |
+          cd qt-src\build
+          jom -j %NUMBER_OF_PROCESSORS%
+          jom install
+
+      - name: 上传 Qt 源码
+        uses: actions/upload-artifact@v4
+        with:
+          name: qt-src
+          path: qt-src
+
+      - name: 上传基础库
+        uses: actions/upload-artifact@v4
+        with:
+          name: qt-base
+          path: D:\Qt\base
+
+  # ==========================
+  # 层1：并行编译组A（无互相依赖）
+  # ==========================
+  build-layer1a:
     runs-on: windows-latest
-    outputs:
-      cache_hit: ${{ steps.cache.outputs.cache-hit }}
-      qt_build_dir: qt-build
+    needs: build-qtbase
+    name: Layer1A - svg,tools,5compat,serialport
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: qt-base, path: D:\Qt\base }
+      - uses: actions/download-artifact@v4
+        with: { name: qt-src, path: qt-src }
+      - run: choco install ninja jom strawberryperl -y
 
-      - name: Setup MSVC environment
+      - name: 设置 MSVC 环境
         uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
-      - name: Cache Qt base build
-        id: cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            qt-build
-          key: qt-${{ env.QT_VERSION }}-core-${{ runner.os }}
-
-      - name: Download and build Qt core
-        if: steps.cache.outputs.cache-hit != 'true'
-        shell: pwsh
+      - name: 编译模块
+        shell: cmd
         run: |
-          $qtVersion = "${{ env.QT_VERSION }}"
-          
-          Write-Host "=== 开始下载 Qt $qtVersion 核心模块 ==="
-          
-          # Create build directory
-          New-Item -ItemType Directory -Force -Path "qt-build" | Out-Null
-          Set-Location qt-build
-          
-          # Clone Qt source with qtbase submodule
-          $qtRepoUrl = "https://code.qt.io/qt/qt5.git"
-          Write-Host "正在克隆 Qt 仓库..."
-          git clone --branch v$qtVersion --single-branch $qtRepoUrl qt5
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "克隆 Qt 仓库失败"
-            exit 1
-          }
-          
-          Set-Location qt5
-          
-          # Initialize only qtbase
-          Write-Host "初始化核心模块 qtbase..."
-          git submodule update --init --recursive --depth 1 qtbase
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "初始化 qtbase 失败"
-            exit 1
-          }
-          
-          Write-Host "=== 核心模块下载完成 ==="
+          set PATH=D:\Qt\base\bin;%PATH%
+          cd qt-src && mkdir build && cd build
+          ..\configure.bat -static -static-runtime -release -prefix D:\Qt\layer1a
+          jom -j %NUMBER_OF_PROCESSORS% ^
+            module-qtsvg ^
+            module-qttools ^
+            module-qt5compat ^
+            module-qtserialport
+          jom install
 
-      - name: Configure Qt
-        if: steps.cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          $qtVersion = "${{ env.QT_VERSION }}"
-          
-          Write-Host "=== 开始配置 Qt 编译 ==="
-          
-          Set-Location qt-build/qt5
-          
-          # Create build directory
-          New-Item -ItemType Directory -Force -Path "../build" | Out-Null
-          
-          # Configure Qt with optimizations
-          $configureArgs = @(
-            "-prefix", "$(Get-Location)/../install",
-            "-release",
-            "-optimize-size",
-            "-ltcg",
-            "-platform", "win32-msvc",
-            "-nomake", "examples",
-            "-nomake", "tests",
-            "-opensource",
-            "-confirm-license"
-          )
-          
-          Write-Host "配置参数: $configureArgs"
-          
-          # Run configure
-          & ./configure @configureArgs
-          
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Qt 配置失败"
-            exit 1
-          }
-          
-          Write-Host "=== Qt 配置完成 ==="
+      - uses: actions/upload-artifact@v4
+        with: { name: qt-layer1a, path: D:\Qt\layer1a }
 
-      - name: Build qtbase
-        if: steps.cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          Write-Host "=== 开始编译核心模块 qtbase ==="
-          
-          Set-Location qt-build/qt5
-          
-          # Build qtbase (core dependency for all other modules)
-          ninja -j $env:NUMBER_OF_PROCESSORS qtbase
-          
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "qtbase 编译失败"
-            exit 1
-          }
-          
-          Write-Host "=== qtbase 编译完成 ==="
-
-  build-modules:
-    needs: build-core
+  # ==========================
+  # 层1：并行编译组B
+  # ==========================
+  build-layer1b:
     runs-on: windows-latest
-    continue-on-error: true
-    strategy:
-      matrix:
-        module_group:
-          - name: essential
-            modules: ["qtdeclarative", "qtnetworkauth", "qtwebsockets"]
-          - name: multimedia
-            modules: ["qtmultimedia"]
-          - name: xml
-            modules: ["qtxmlpatterns"]
-          - name: core-addons
-            modules: ["qt5compat"]
-          - name: network-addons
-            modules: ["qtpositioning", "qtlocation"]
-          - name: gui-addons
-            modules: ["qtcharts"]
-          - name: utility
-            modules: ["qttools"]
-          - name: web
-            modules: ["qtwebchannel", "qtwebengine", "qtwebview"]
-          - name: quick
-            modules: ["qtquicktimeline"]
-          - name: 3d
-            modules: ["qt3d", "qtquick3d", "qtquick3dphysics"]
-          - name: serialization
-            modules: ["qtremoteobjects", "qtscxml"]
-          - name: virtual-keyboard
-            modules: ["qtvirtualkeyboard"]
-          - name: sensors
-            modules: ["qtsensors"]
-          - name: speech
-            modules: ["qtspeech"]
-          - name: connectivity
-            modules: ["qtconnectivity", "qtcoap", "qtmqtt", "qtopcua"]
-          - name: graphics
-            modules: ["qtgraphs", "qtlottie", "qtdatavis3d"]
-          - name: server
-            modules: ["qthttpserver", "qtgrpc"]
-          - name: formats
-            modules: ["qtimageformats", "qtshadertools"]
-          - name: other
-            modules: ["qttranslations", "qtsvg", "qtactiveqt", "qtgamepad", "qtfeedback"]
+    needs: build-qtbase
+    name: Layer1B - imageformats,networkauth,mqtt,translations
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: qt-base, path: D:\Qt\base }
+      - uses: actions/download-artifact@v4
+        with: { name: qt-src, path: qt-src }
+      - run: choco install ninja jom strawberryperl -y
 
-      - name: Setup MSVC environment
+      - name: 设置 MSVC 环境
         uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
-      - name: Restore Qt core build cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            qt-build
-          key: qt-${{ env.QT_VERSION }}-core-${{ runner.os }}
-
-      - name: Update submodules for module group
-        shell: pwsh
+      - name: 编译模块
+        shell: cmd
         run: |
-          $qtVersion = "${{ env.QT_VERSION }}"
-          $groupName = "${{ matrix.module_group.name }}"
-          $modules = '${{ toJson(matrix.module_group.modules) }}' | ConvertFrom-Json
-          
-          Write-Host "=== 开始更新 $groupName 模块组所需代码 ==="
-          
-          Set-Location qt-build/qt5
-          
-          # Initialize required modules for this group
-          foreach ($module in $modules) {
-            Write-Host "初始化模块: $module"
-            try {
-              git submodule update --init --recursive --depth 1 $module
-              if ($LASTEXITCODE -ne 0) {
-                Write-Warning "初始化模块 $module 失败，将跳过此模块"
-                continue
-              }
-            } catch {
-              Write-Warning "初始化模块 $module 时发生异常: $($_.Exception.Message)"
-              continue
-            }
-          }
-          
-          Write-Host "=== $groupName 模块组代码更新完成 ==="
+          set PATH=D:\Qt\base\bin;%PATH%
+          cd qt-src && mkdir build && cd build
+          ..\configure.bat -static -static-runtime -release -prefix D:\Qt\layer1b
+          jom -j %NUMBER_OF_PROCESSORS% ^
+            module-qtimageformats ^
+            module-qtnetworkauth ^
+            module-qtmqtt ^
+            module-qttranslations
+          jom install
 
-      - name: Build module group ${{ matrix.module_group.name }}
-        shell: pwsh
-        run: |
-          $groupName = "${{ matrix.module_group.name }}"
-          $modules = '${{ toJson(matrix.module_group.modules) }}' | ConvertFrom-Json
-          
-          Write-Host "=== 开始编译模块组: $groupName ==="
-          Write-Host "模块: $($modules -join ', ' )"
-          
-          Set-Location qt-build/qt5
-          
-          # Build all modules in this group
-          foreach ($module in $modules) {
-            Write-Host "编译模块: $module"
-            try {
-              ninja -j $env:NUMBER_OF_PROCESSORS $module
-              if ($LASTEXITCODE -ne 0) {
-                Write-Warning "模块 $module 编译失败，将跳过此模块"
-                continue
-              }
-            } catch {
-              Write-Warning "编译模块 $module 时发生异常: $($_.Exception.Message)"
-              continue
-            }
-          }
-          
-          Write-Host "=== 模块组 $groupName 编译完成 ==="
+      - uses: actions/upload-artifact@v4
+        with: { name: qt-layer1b, path: D:\Qt\layer1b }
 
-  install-and-publish:
-    needs: [prepare, build-core, build-modules]
+  # ==========================
+  # 层2：依赖 qtdeclarative(QML/Quick)
+  # ==========================
+  build-layer2:
     runs-on: windows-latest
+    needs: [ build-layer1a, build-layer1b ]
+    name: Layer2 - declarative,quick,multimedia,websockets
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: qt-base, path: D:\Qt\base }
+      - uses: actions/download-artifact@v4
+        with: { name: qt-src, path: qt-src }
+      - run: choco install ninja jom strawberryperl -y
 
-      - name: Setup MSVC environment
+      - name: 设置 MSVC 环境
         uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
-      - name: Restore Qt core build cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            qt-build
-          key: qt-${{ env.QT_VERSION }}-core-${{ runner.os }}
-
-      - name: Download complete Qt source code
-        shell: pwsh
+      - name: 编译层2模块
+        shell: cmd
         run: |
-          $qtVersion = "${{ env.QT_VERSION }}"
-          
-          Write-Host "=== 开始下载完整的 Qt $qtVersion 源代码 ==="
-          
-          Set-Location qt-build/qt5
-          
-          # Initialize all submodules
-          Write-Host "初始化所有子模块..."
-          git submodule update --init --recursive
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "初始化子模块失败"
-            exit 1
-          }
-          
-          Write-Host "=== 完整源代码下载完成 ==="
+          set PATH=D:\Qt\base\bin;%PATH%
+          cd qt-src && mkdir build && cd build
+          ..\configure.bat -static -static-runtime -release -prefix D:\Qt\layer2
+          jom -j %NUMBER_OF_PROCESSORS% ^
+            module-qtdeclarative ^
+            module-qtquickcontrols2 ^
+            module-qtmultimedia ^
+            module-qtwebsockets ^
+            module-qtwebchannel
+          jom install
 
-      - name: Install Qt
-        shell: pwsh
-        run: |
-          Write-Host "=== 开始安装 Qt ==="
-          
-          Set-Location qt-build/qt5
-          
-          ninja install
-          
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Qt 安装失败"
-            exit 1
-          }
-          
-          Write-Host "=== Qt 安装完成 ==="
+      - uses: actions/upload-artifact@v4
+        with: { name: qt-layer2, path: D:\Qt\layer2 }
 
-      - name: Collect .lib files
-        shell: pwsh
-        run: |
-          Write-Host "=== 开始收集 .lib 文件 ==="
-          
-          $installDir = "qt-build/install"
-          $outputDir = "qt-libs"
-          
-          New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-          
-          # Find all .lib files
-          $libFiles = Get-ChildItem -Path $installDir -Recurse -Filter "*.lib" -ErrorAction SilentlyContinue
-          
-          if ($libFiles.Count -eq 0) {
-            Write-Error "未找到任何 .lib 文件"
-            exit 1
-          }
-          
-          Write-Host "找到 $($libFiles.Count) 个 .lib 文件"
-          
-          # Copy all .lib files to output directory with original names
-          foreach ($lib in $libFiles) {
-            $destPath = Join-Path $outputDir $lib.Name
-            # Handle duplicate names by adding a counter
-            $counter = 1
-            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($lib.Name)
-            $extension = $lib.Extension
-            while (Test-Path $destPath) {
-              $newName = "${baseName}_${counter}${extension}"
-              $destPath = Join-Path $outputDir $newName
-              $counter++
-            }
-            Copy-Item $lib.FullName $destPath
-            Write-Host "已复制: $($lib.FullName) -> $destPath"
-          }
-          
-          # Create a list of all lib files
-          $libList = Get-ChildItem -Path $outputDir -Filter "*.lib" | Select-Object -ExpandProperty Name
-          $libList -join "`n" | Out-File -FilePath "$outputDir/lib-list.txt" -Encoding UTF8
-          
-          Write-Host "=== .lib 文件收集完成 ==="
-          Write-Host "输出目录: $(Resolve-Path $outputDir)"
-
-      - name: GH Release
-        uses: softprops/action-gh-release@v2.6.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: qt-${{ env.QT_VERSION }}-${{ github.run_number }}
-          name: Qt ${{ env.QT_VERSION }} Windows Libraries
-          body: |
-            ## Qt ${{ env.QT_VERSION }} Windows 编译库
-            
-            **编译日期:** ${{ github.event.head_commit.timestamp }}
-            
-            **包含的子模块:**
-            全部子模块
-            
-            **编译配置:**
-            - 优化级别: -O2 (优化大小)
-            - 链接时优化: LTCG 已启用
-            - 平台: Windows x64
-            - 编译器: MSVC
-            
-            **包含文件:**
-            所有编译生成的 .lib 文件（静态库）
-            
-            详见附件中的库文件列表。
-          draft: false
-          prerelease: false
-          files: |
-            qt-libs/*.lib
-            qt-libs/lib-list.txt
-
-  error-handling:
-    needs: [prepare, build-core, build-modules, install-and-publish]
-    if: failure()
+  # ==========================
+  # 层3：最后编译 WebEngine
+  # ==========================
+  build-webengine:
     runs-on: windows-latest
+    needs: build-layer2
+    name: Layer3 - WebEngine
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: qt-base, path: D:\Qt\base }
+      - uses: actions/download-artifact@v4
+        with: { name: qt-src, path: qt-src }
+      - run: choco install ninja jom strawberryperl -y
 
-      - name: Error handling and cleanup
-        shell: pwsh
+      - name: 设置 MSVC 环境
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: 编译 WebEngine
+        shell: cmd
         run: |
-          Write-Host "=== 工作流执行失败 ==="
-          Write-Host "错误步骤: ${{ github.job }}"
-          
-          # Output error information
-          if (Test-Path "qt-build/qt5") {
-            Write-Host "Qt 源代码目录存在"
-          } else {
-            Write-Host "Qt 源代码目录不存在 - 下载可能失败"
+          set PATH=D:\Qt\base\bin;%PATH%
+          cd qt-src && mkdir build && cd build
+          ..\configure.bat -static -static-runtime -release -prefix D:\Qt\webengine
+          jom -j %NUMBER_OF_PROCESSORS% module-qtwebengine
+          jom install
+
+      - uses: actions/upload-artifact@v4
+        with: { name: qt-webengine, path: D:\Qt\webengine }
+
+  # ==========================
+  # 最终合并完整静态SDK
+  # ==========================
+  merge-sdk:
+    runs-on: windows-latest
+    needs: [ build-qtbase, build-layer1a, build-layer1b, build-layer2, build-webengine ]
+    name: 合并并上传完整Qt静态SDK
+    steps:
+      - name: 下载所有编译产物
+        uses: actions/download-artifact@v4
+        with: { path: artifacts }
+
+      - name: 合并成一个完整SDK
+        run: |
+          mkdir D:\Qt-6.10.3-Static-Full
+          foreach ($dir in Get-ChildItem artifacts/qt-*) {
+            robocopy $dir D:\Qt-6.10.3-Static-Full /E /IS /IT
           }
-          
-          if (Test-Path "qt-build/build") {
-            Write-Host "编译目录存在"
-            Set-Location qt-build/build
-            if (Test-Path "CMakeFiles/CMakeError.log") {
-              Write-Host "=== CMake 错误日志 ==="
-              Get-Content "CMakeFiles/CMakeError.log" -Tail 50
-            }
-          }
-          
-          exit 1
+
+      - name: 打包7z
+        run: 7z a Qt-6.10.3-Static-Full.7z D:\Qt-6.10.3-Static-Full
+
+      - name: 上传最终SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Qt-6.10.3-Static-Full
+          path: Qt-6.10.3-Static-Full.7z
