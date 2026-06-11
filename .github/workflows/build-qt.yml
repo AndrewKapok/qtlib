@@ -1,163 +1,176 @@
-name: Build Qt Static with WebEngine (Individual .lib Upload)
+name: Build Qt Static Libraries
 
 on:
   workflow_dispatch:
     inputs:
       qt_version:
-        description: 'Qt version (e.g. 6.5.3). Leave empty for latest stable.'
+        description: 'Qt 版本号 (例如: 6.8.2, 6.9.0, 5.15.16)'
+        required: true
+        default: '6.8.2'
+        type: string
+      qt_module_subset:
+        description: '要编译的子模块 (qtbase 或 essential 或 addon 或 留空表示全部)'
         required: false
-        default: ''
-      modules_to_skip:
-        description: 'Comma separated modules to skip. Default: empty = build all.'
-        required: false
-        default: ''
+        default: 'essential'
+        type: choice
+        options:
+          - ''
+          - 'qtbase'
+          - 'essential'
+          - 'addon'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-qt:
     runs-on: windows-latest
-    timeout-minutes: 480
     env:
-      QT_INSTALL_DIR: ${{ github.workspace }}\qt-install
-    outputs:
-      version: ${{ steps.resolve_version.outputs.version }}
+      QT_SRC_DIR: ${{ github.workspace }}/qt-src
+      QT_BUILD_DIR: ${{ github.workspace }}/qt-build
+      QT_INSTALL_DIR: ${{ github.workspace }}/qt-install
+      MSVC_ARCH: x64
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ---------- 解析版本 ----------
-      - name: Resolve Qt version
-        id: resolve_version
-        shell: pwsh
-        run: |
-          $inputVer = '${{ inputs.qt_version }}'.Trim()
-          if ($inputVer) {
-            Write-Host "Using provided version: $inputVer"
-            echo "version=$inputVer" >> $env:GITHUB_OUTPUT
-          } else {
-            $baseUrl = "https://download.qt.io/official_releases/qt/"
-            $response = Invoke-WebRequest -Uri $baseUrl -UseBasicParsing
-            $links = $response.Links | Where-Object { $_.href -match '^6\.\d+\.\d+/$' } | ForEach-Object { $_.href.Trim('/') }
-            $latest = $links | Sort-Object {[version]$_} -Descending | Select-Object -First 1
-            if (-not $latest) {
-              Write-Error "Cannot find any Qt 6.x release."
-              exit 1
-            }
-            Write-Host "Resolved latest version: $latest"
-            echo "version=$latest" >> $env:GITHUB_OUTPUT
-          }
-
-      # ---------- 安装编译依赖（包括 aria2） ----------
+      # ========== 1. 安装编译依赖 ==========
       - name: Install build dependencies
-        shell: pwsh
         run: |
-          python --version
-          perl --version
-          # 编译工具
-          choco install ninja -y --no-progress
-          # WebEngine 依赖
-          choco install winflexbison3 gperf -y --no-progress
-          # 下载加速工具 aria2
-          choco install aria2 -y --no-progress
-          refreshenv
-          ninja --version
-          win_flex --version
-          win_bison --version
-          gperf --version
-          aria2c --version
+          choco install python ninja -y --no-progress
+          # 添加 Python 和 Ninja 到 PATH
+          echo "C:\Program Files\Python3\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\Program Files\Python3" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # ---------- 使用 aria2c 多线程下载源码 ----------
-      - name: Download Qt source with aria2c
-        env:
-          VER: ${{ steps.resolve_version.outputs.version }}
-        shell: pwsh
-        run: |
-          $majorMinor = $env:VER.Substring(0, $env:VER.LastIndexOf('.'))
-          $url = "https://download.qt.io/official_releases/qt/$majorMinor/$env:VER/single/qt-everywhere-src-$env:VER.zip"
-          Write-Host "Downloading: $url (using aria2c with 8 connections)"
-
-          # 清理残留
-          Remove-Item -Force qt-src.zip -ErrorAction SilentlyContinue
-
-          # 下载（不指定 -o，让 aria2c 自动命名）
-          aria2c -x 8 -s 8 --summary-interval=30 --allow-overwrite=true "$url"
-
-          # 查找下载的 zip
-          $zipFile = Get-ChildItem -Filter "qt-everywhere-src-*.zip" | Select-Object -First 1
-          if (-not $zipFile) {
-            Write-Error "Downloaded Qt source zip not found!"
-            exit 1
-          }
-          Write-Host "Found zip: $($zipFile.Name)"
-
-          # 使用 7z 多线程解压，-o 后跟输出目录，必须用引号括起来
-          Write-Host "Extracting with 7z (multi-threaded)..."
-          7z x "$($zipFile.FullName)" "-o." -y
-
-          $srcFolder = Get-ChildItem -Directory | Where-Object { $_.Name -like 'qt-everywhere-src-*' } | Select-Object -First 1
-          if (-not $srcFolder) {
-            Write-Error "Qt source directory not found after extraction"
-            exit 1
-          }
-          echo "SRC_DIR=$($srcFolder.FullName)" >> $env:GITHUB_ENV
-
-      # ---------- 配置 (static, release, /O2) ----------
-      - name: Configure Qt
-        shell: cmd
-        run: |
-          cd /d %SRC_DIR%
-          set "SKIP_ARGS="
-          if not "${{ inputs.modules_to_skip }}"=="" (
-            for %%i in (${{ inputs.modules_to_skip }}) do set "SKIP_ARGS=!SKIP_ARGS! -skip %%i"
-          )
-          call configure.bat ^
-            -static ^
-            -static-runtime ^
-            -release ^
-            -prefix "%QT_INSTALL_DIR%" ^
-            -opensource ^
-            -confirm-license ^
-            -nomake examples ^
-            -nomake tests ^
-            -platform win32-msvc ^
-            -mp ^
-            %SKIP_ARGS%
-        timeout-minutes: 10
-
-      # ---------- 编译 ----------
-      - name: Build Qt
-        shell: cmd
-        run: |
-          cd /d %SRC_DIR%
-          cmake --build . --parallel --target install
-        timeout-minutes: 460
-
-      # ---------- 收集所有 .lib 文件 ----------
-      - name: List all .lib files
-        id: list_libs
-        shell: pwsh
-        run: |
-          $libs = Get-ChildItem -Path "$env:QT_INSTALL_DIR\lib" -Filter *.lib -Recurse |
-                  ForEach-Object { $_.FullName }
-          $libsString = $libs -join "`n"
-          "lib_paths<<EOF" >> $env:GITHUB_OUTPUT
-          $libsString >> $env:GITHUB_OUTPUT
-          "EOF" >> $env:GITHUB_OUTPUT
-          Write-Host "Found $($libs.Count) library files."
-
-      # ---------- 逐个上传到 Release ----------
-      - name: Upload each .lib to Release
-        uses: softprops/action-gh-release@v2
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
         with:
-          tag_name: qt-static-${{ steps.resolve_version.outputs.version }}
-          name: Qt ${{ steps.resolve_version.outputs.version }} Static Libraries (MSVC 2022 x64)
+          arch: x64
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # ========== 2. 克隆 Qt 源码 ==========
+      - name: Clone Qt source
+        run: |
+          git clone --branch v${{ inputs.qt_version }} --depth 1 https://code.qt.io/qt/qt5.git ${{ env.QT_SRC_DIR }}
+
+      - name: Initialize submodules
+        working-directory: ${{ env.QT_SRC_DIR }}
+        run: |
+          if "${{ inputs.qt_module_subset }}" == "" (
+            perl init-repository --no-update
+          ) elseif "${{ inputs.qt_module_subset }}" == "qtbase" (
+            perl init-repository --module-subset=qtbase --no-update
+          ) elseif "${{ inputs.qt_module_subset }}" == "essential" (
+            perl init-repository --module-subset=essential --no-update
+          ) elseif "${{ inputs.qt_module_subset }}" == "addon" (
+            perl init-repository --module-subset=addon --no-update
+          ) else (
+            perl init-repository --module-subset=${{ inputs.qt_module_subset }} --no-update
+          )
+        shell: cmd
+
+      # ========== 3. 配置编译 (静态库 + O2 优化) ==========
+      - name: Configure Qt
+        working-directory: ${{ env.QT_BUILD_DIR }}
+        run: |
+          mkdir ${{ env.QT_BUILD_DIR }}
+          cd ${{ env.QT_BUILD_DIR }}
+          ${{ env.QT_SRC_DIR }}/configure.bat `
+            -prefix ${{ env.QT_INSTALL_DIR }} `
+            -release `
+            -static `
+            -static-runtime `
+            -optimize-size `
+            -opengl desktop `
+            -accessibility `
+            -no-icu `
+            -no-sql-sqlite `
+            -no-qml-debug `
+            -nomake examples `
+            -nomake tests `
+            -skip qtwebengine `
+            -no-dbus `
+            -no-feature-gssapi `
+            -opensource `
+            -confirm-license
+        shell: pwsh
+
+      # ========== 4. 编译 ==========
+      - name: Build Qt
+        working-directory: ${{ env.QT_BUILD_DIR }}
+        run: |
+          cmake --build . --parallel --config Release
+
+      # ========== 5. 安装 ==========
+      - name: Install Qt
+        working-directory: ${{ env.QT_BUILD_DIR }}
+        run: |
+          cmake --install . --config Release
+
+      # ========== 6. 收集所有 .lib 文件 ==========
+      - name: Collect lib files
+        working-directory: ${{ env.QT_INSTALL_DIR }}
+        run: |
+          mkdir ${{ github.workspace }}/qt-libs
+          Get-ChildItem -Path . -Recurse -Filter "*.lib" | ForEach-Object {
+            $relativePath = $_.FullName.Substring((Get-Location).Path.Length + 1)
+            $safeName = $relativePath -replace '[\\/]', '_'
+            Copy-Item $_.FullName -Destination "${{ github.workspace }}/qt-libs\$safeName"
+          }
+          # 也复制 .prl 文件（静态库的导入库描述）
+          Get-ChildItem -Path . -Recurse -Filter "*.prl" | ForEach-Object {
+            $relativePath = $_.FullName.Substring((Get-Location).Path.Length + 1)
+            $safeName = $relativePath -replace '[\\/]', '_'
+            Copy-Item $_.FullName -Destination "${{ github.workspace }}/qt-libs\$safeName"
+          }
+        shell: pwsh
+
+      - name: List collected libs
+        run: |
+          Write-Host "=== 收集到的 .lib 文件 ==="
+          Get-ChildItem ${{ github.workspace }}/qt-libs -Filter "*.lib" | ForEach-Object { Write-Host $_.Name }
+          Write-Host "=========================="
+          Write-Host "文件总数: $((Get-ChildItem ${{ github.workspace }}/qt-libs -File).Count)"
+        shell: pwsh
+
+      # ========== 7. 打包头文件和库文件（可选）==========
+      - name: Package includes
+        run: |
+          # 将头文件目录打包
+          Compress-Archive -Path "${{ env.QT_INSTALL_DIR }}/include/*" -DestinationPath "${{ github.workspace }}/qt-libs/include.zip"
+        shell: pwsh
+
+      # ========== 8. 上传到 GitHub Release ==========
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "Qt ${{ inputs.qt_version }} Static Libraries (Windows x64)"
+          tag_name: "qt-${{ inputs.qt_version }}-static"
           body: |
-            Static `.lib` files compiled from Qt ${{ steps.resolve_version.outputs.version }} source.
-            - **Platform**: Windows x64
-            - **Compiler**: MSVC 2022 (Visual Studio 2022)
-            - **Configuration**: static, release, static-runtime (/MT), /O2 optimization
-            - **Included modules**: all (unless skipped manually)
-            - **Download acceleration**: Qt source fetched via aria2c (multi-connection)
-            Each `.lib` is uploaded individually (no archive).
-          files: ${{ steps.list_libs.outputs.lib_paths }}
+            ## Qt ${{ inputs.qt_version }} 静态库 (Windows x64)
+            
+            ### 编译配置
+            - 编译器: MSVC (Visual Studio 2022)
+            - 架构: x64
+            - 优化: O2 (`-optimize-size`)
+            - 链接: 静态库 (`-static -static-runtime`)
+            - 子模块: ${{ inputs.qt_module_subset || '全部' }}
+            
+            ### 使用方法
+            1. 下载所需模块的 .lib 文件和头文件包 (`include.zip`)
+            2. 在 MSVC 项目中添加库路径和头文件路径
+            3. 链接对应的 .lib 文件
+          files: |
+            ${{ github.workspace }}/qt-libs/*.lib
+            ${{ github.workspace }}/qt-libs/*.prl
+            ${{ github.workspace }}/qt-libs/include.zip
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
