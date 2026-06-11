@@ -74,15 +74,26 @@ jobs:
           $majorMinor = $env:VER.Substring(0, $env:VER.LastIndexOf('.'))
           $url = "https://download.qt.io/official_releases/qt/$majorMinor/$env:VER/single/qt-everywhere-src-$env:VER.zip"
           Write-Host "Downloading: $url (using aria2c with 8 connections)"
+
+          # 清理残留
           Remove-Item -Force qt-src.zip -ErrorAction SilentlyContinue
+
+          # 下载（不指定 -o，让 aria2c 自动命名）
           aria2c -x 8 -s 8 --summary-interval=30 --allow-overwrite=true "$url"
+
+          # 查找下载的 zip
           $zipFile = Get-ChildItem -Filter "qt-everywhere-src-*.zip" | Select-Object -First 1
           if (-not $zipFile) {
-          Write-Error "Downloaded Qt source zip not found!"
-          exit 1
+            Write-Error "Downloaded Qt source zip not found!"
+            exit 1
           }
           Write-Host "Found zip: $($zipFile.Name)"
-          7z x $zipFile.FullName -o. -y
+
+          # 使用 7z 多线程解压，-o 后跟输出目录，必须用引号括起来
+          Write-Host "Extracting with 7z (multi-threaded)..."
+          7z x "$($zipFile.FullName)" "-o." -y
+
+          # 定位源码目录
           $folder = Get-ChildItem -Directory | Where-Object { $_.Name -like 'qt-everywhere-src-*' } | Select-Object -First 1
           echo "SRC_DIR=$pwd\$folder" >> $env:GITHUB_ENV
 
