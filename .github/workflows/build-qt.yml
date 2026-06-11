@@ -46,31 +46,36 @@ jobs:
             echo "version=$latest" >> $env:GITHUB_OUTPUT
           }
 
-      # ---------- 安装编译依赖 ----------
+      # ---------- 安装编译依赖（包括 aria2） ----------
       - name: Install build dependencies
         shell: pwsh
         run: |
           python --version
           perl --version
+          # 编译工具
           choco install ninja -y --no-progress
           # WebEngine 依赖
           choco install winflexbison3 gperf -y --no-progress
+          # 下载加速工具 aria2
+          choco install aria2 -y --no-progress
           refreshenv
           ninja --version
           win_flex --version
           win_bison --version
           gperf --version
+          aria2c --version
 
-      # ---------- 下载源码 ----------
-      - name: Download Qt source
+      # ---------- 使用 aria2c 多线程下载源码 ----------
+      - name: Download Qt source with aria2c
         env:
           VER: ${{ steps.resolve_version.outputs.version }}
         shell: pwsh
         run: |
           $majorMinor = $env:VER.Substring(0, $env:VER.LastIndexOf('.'))
           $url = "https://download.qt.io/official_releases/qt/$majorMinor/$env:VER/single/qt-everywhere-src-$env:VER.zip"
-          Write-Host "Downloading: $url"
-          Invoke-WebRequest -Uri $url -OutFile qt-src.zip
+          Write-Host "Downloading: $url (using aria2c with 8 connections)"
+          aria2c -x 8 -s 8 --summary-interval=30 -o qt-src.zip $url
+          Write-Host "Download completed. Unzipping..."
           Expand-Archive -Path qt-src.zip -DestinationPath .
           $folder = Get-ChildItem -Directory | Where-Object { $_.Name -like 'qt-everywhere-src-*' } | Select-Object -First 1
           echo "SRC_DIR=$pwd\$folder" >> $env:GITHUB_ENV
@@ -114,7 +119,6 @@ jobs:
           $libs = Get-ChildItem -Path "$env:QT_INSTALL_DIR\lib" -Filter *.lib -Recurse |
                   ForEach-Object { $_.FullName }
           $libsString = $libs -join "`n"
-          # 输出为多行字符串，供后续 action 使用
           "lib_paths<<EOF" >> $env:GITHUB_OUTPUT
           $libsString >> $env:GITHUB_OUTPUT
           "EOF" >> $env:GITHUB_OUTPUT
@@ -132,6 +136,7 @@ jobs:
             - **Compiler**: MSVC 2022 (Visual Studio 2022)
             - **Configuration**: static, release, static-runtime (/MT), /O2 optimization
             - **Included modules**: all (unless skipped manually)
+            - **Download acceleration**: Qt source fetched via aria2c (multi-connection)
             Each `.lib` is uploaded individually (no archive).
           files: ${{ steps.list_libs.outputs.lib_paths }}
         env:
