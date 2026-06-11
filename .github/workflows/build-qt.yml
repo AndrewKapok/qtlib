@@ -1,338 +1,138 @@
-name: Qt 6.10.3 全模块静态编译(多Runner并行+WebEngine)
+name: Build Qt Static with WebEngine (Individual .lib Upload)
 
 on:
   workflow_dispatch:
+    inputs:
+      qt_version:
+        description: 'Qt version (e.g. 6.5.3). Leave empty for latest stable.'
+        required: false
+        default: ''
+      modules_to_skip:
+        description: 'Comma separated modules to skip. Default: empty = build all.'
+        required: false
+        default: ''
 
 jobs:
-  # ==========================
-  # 层0：必须最先编译 qtbase
-  # ==========================
-  build-qtbase:
+  build:
     runs-on: windows-latest
-    name: Layer 0 - qtbase
+    timeout-minutes: 480
+    env:
+      QT_INSTALL_DIR: ${{ github.workspace }}\qt-install
+    outputs:
+      version: ${{ steps.resolve_version.outputs.version }}
     steps:
-      - name: 安装 Python & aqtinstall
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------- 解析版本 ----------
+      - name: Resolve Qt version
+        id: resolve_version
+        shell: pwsh
         run: |
-          python -m pip install -U pip
-          pip install aqtinstall
-
-      - name: 自动下载 Qt 源码
-        run: |
-          aqt install-src --outputdir . windows desktop 6.10.3
-          move 6.10.3\Src qt-src
-
-      - name: 安装依赖
-        run: choco install ninja jom strawberryperl -y
-
-      - name: 设置 MSVC 环境
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: 配置并编译 qtbase (静态 .lib)
-        shell: cmd
-        run: |
-          cd qt-src\qtbase
-          mkdir build && cd build
-          cmake .. -G "Ninja" ^
-            -DCMAKE_BUILD_TYPE=Release ^
-            -DCMAKE_INSTALL_PREFIX=D:\Qt\base ^
-            -DBUILD_SHARED_LIBS=OFF ^
-            -DFEATURE_static_runtime=ON ^
-            -DFEATURE_optimize_size=OFF ^
-            -DFEATURE_examples=OFF ^
-            -DFEATURE_tests=OFF ^
-            -DQT_BUILD_EXAMPLES=OFF ^
-            -DQT_BUILD_TESTS=OFF ^
-            -DFEATURE_pdf=OFF ^
-            -DFEATURE_printsupport=OFF ^
-            -DFEATURE_system_zlib=OFF ^
-            -DFEATURE_system_pcre2=OFF ^
-            -DFEATURE_system_png=OFF ^
-            -DFEATURE_system_harfbuzz=OFF ^
-            -DFEATURE_system_freetype=OFF ^
-            -DQT_FEATURE_pdf=OFF
-          ninja -j %NUMBER_OF_PROCESSORS%
-          ninja install
-
-      - name: 上传基础库
-        uses: actions/upload-artifact@v4
-        with:
-          name: qt-base
-          path: D:\Qt\base
-
-  # ==========================
-  # 层1：并行编译组A（无互相依赖）
-  # ==========================
-  build-layer1a:
-    runs-on: windows-latest
-    needs: build-qtbase
-    name: Layer1A - svg,tools,5compat,serialport
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { name: qt-base, path: D:\Qt\base }
-      - name: 安装 Python & aqtinstall
-        run: |
-          python -m pip install -U pip
-          pip install aqtinstall
-      - name: 下载所需 Qt 模块源码
-        run: |
-          aqt install-src --outputdir . windows desktop 6.10.3 --archives qtsvg qttools qt5compat qtserialport
-          move 6.10.3\Src qt-src
-      - run: choco install ninja jom strawberryperl -y
-
-      - name: 设置 MSVC 环境
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: 编译 qtsvg
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src\qtsvg
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - name: 编译 qttools
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src\qttools
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - name: 编译 qt5compat
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src\qt5compat
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - name: 编译 qtserialport
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src\qtserialport
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1a -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - uses: actions/upload-artifact@v4
-        with: { name: qt-layer1a, path: D:\Qt\layer1a }
-
-  # ==========================
-  # 层1：并行编译组B
-  # ==========================
-  build-layer1b:
-    runs-on: windows-latest
-    needs: build-qtbase
-    name: Layer1B - imageformats,networkauth,mqtt,translations
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { name: qt-base, path: D:\Qt\base }
-      - name: 安装 Python & aqtinstall
-        run: |
-          python -m pip install -U pip
-          pip install aqtinstall
-      - name: 下载所需 Qt 模块源码
-        run: |
-          aqt install-src --outputdir . windows desktop 6.10.3 --archives qtimageformats qtnetworkauth qtmqtt qttranslations
-          move 6.10.3\Src qt-src
-      - run: choco install ninja jom strawberryperl -y
-
-      - name: 设置 MSVC 环境
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: 编译 qtimageformats
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src\qtimageformats
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - name: 编译 qtnetworkauth
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src\qtnetworkauth
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - name: 编译 qtmqtt
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src\qtmqtt
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - name: 编译 qttranslations
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;%PATH%
-          cd qt-src\qttranslations
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=D:\Qt\base -DCMAKE_INSTALL_PREFIX=D:\Qt\layer1b -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - uses: actions/upload-artifact@v4
-        with: { name: qt-layer1b, path: D:\Qt\layer1b }
-
-  # ==========================
-  # 层2：依赖 qtdeclarative(QML/Quick)
-  # ==========================
-  build-layer2:
-    runs-on: windows-latest
-    needs: [ build-layer1a, build-layer1b ]
-    name: Layer2 - declarative,quick,multimedia,websockets
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { name: qt-base, path: D:\Qt\base }
-      - uses: actions/download-artifact@v4
-        with: { name: qt-layer1a, path: D:\Qt\layer1a }
-      - name: 安装 Python & aqtinstall
-        run: |
-          python -m pip install -U pip
-          pip install aqtinstall
-      - name: 下载所需 Qt 模块源码
-        run: |
-          aqt install-src --outputdir . windows desktop 6.10.3 --archives qtdeclarative qtquickcontrols2 qtmultimedia qtwebsockets qtwebchannel
-          move 6.10.3\Src qt-src
-      - run: choco install ninja jom strawberryperl -y
-
-      - name: 设置 MSVC 环境
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: 编译 qtdeclarative
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;%PATH%
-          cd qt-src\qtdeclarative
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - name: 编译 qtquickcontrols2
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
-          cd qt-src\qtquickcontrols2
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - name: 编译 qtmultimedia
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
-          cd qt-src\qtmultimedia
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - name: 编译 qtwebsockets
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
-          cd qt-src\qtwebsockets
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - name: 编译 qtwebchannel
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
-          cd qt-src\qtwebchannel
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\layer2 -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - uses: actions/upload-artifact@v4
-        with: { name: qt-layer2, path: D:\Qt\layer2 }
-
-  # ==========================
-  # 层3：最后编译 WebEngine
-  # ==========================
-  build-webengine:
-    runs-on: windows-latest
-    needs: build-layer2
-    name: Layer3 - WebEngine
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { name: qt-base, path: D:\Qt\base }
-      - uses: actions/download-artifact@v4
-        with: { name: qt-layer1a, path: D:\Qt\layer1a }
-      - uses: actions/download-artifact@v4
-        with: { name: qt-layer2, path: D:\Qt\layer2 }
-      - name: 安装 Python & aqtinstall
-        run: |
-          python -m pip install -U pip
-          pip install aqtinstall
-      - name: 下载 WebEngine 源码
-        run: |
-          aqt install-src --outputdir . windows desktop 6.10.3 --archives qtwebengine
-          move 6.10.3\Src qt-src
-      - run: choco install ninja jom strawberryperl -y
-
-      - name: 设置 MSVC 环境
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: 编译 WebEngine
-        shell: cmd
-        run: |
-          set PATH=D:\Qt\base\bin;D:\Qt\layer1a\bin;D:\Qt\layer2\bin;%PATH%
-          cd qt-src\qtwebengine
-          mkdir build && cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="D:\Qt\base;D:\Qt\layer1a;D:\Qt\layer2" -DCMAKE_INSTALL_PREFIX=D:\Qt\webengine -DBUILD_SHARED_LIBS=OFF
-          cmake --build . --parallel %NUMBER_OF_PROCESSORS%
-          cmake --install .
-
-      - uses: actions/upload-artifact@v4
-        with: { name: qt-webengine, path: D:\Qt\webengine }
-
-  # ==========================
-  # 最终合并完整静态SDK
-  # ==========================
-  merge-sdk:
-    runs-on: windows-latest
-    needs: [ build-qtbase, build-layer1a, build-layer1b, build-layer2, build-webengine ]
-    name: 合并并上传完整Qt静态SDK
-    steps:
-      - name: 下载所有编译产物
-        uses: actions/download-artifact@v4
-        with: { path: artifacts }
-
-      - name: 合并成一个完整SDK
-        run: |
-          mkdir D:\Qt-6.10.3-Static-Full
-          foreach ($dir in Get-ChildItem artifacts/qt-*) {
-            robocopy $dir D:\Qt-6.10.3-Static-Full /E /IS /IT
+          $inputVer = '${{ inputs.qt_version }}'.Trim()
+          if ($inputVer) {
+            Write-Host "Using provided version: $inputVer"
+            echo "version=$inputVer" >> $env:GITHUB_OUTPUT
+          } else {
+            $baseUrl = "https://download.qt.io/official_releases/qt/"
+            $response = Invoke-WebRequest -Uri $baseUrl -UseBasicParsing
+            $links = $response.Links | Where-Object { $_.href -match '^6\.\d+\.\d+/$' } | ForEach-Object { $_.href.Trim('/') }
+            $latest = $links | Sort-Object {[version]$_} -Descending | Select-Object -First 1
+            if (-not $latest) {
+              Write-Error "Cannot find any Qt 6.x release."
+              exit 1
+            }
+            Write-Host "Resolved latest version: $latest"
+            echo "version=$latest" >> $env:GITHUB_OUTPUT
           }
 
-      - name: 打包7z
-        run: 7z a Qt-6.10.3-Static-Full.7z D:\Qt-6.10.3-Static-Full
+      # ---------- 安装编译依赖 ----------
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python --version
+          perl --version
+          choco install ninja -y --no-progress
+          # WebEngine 依赖
+          choco install winflexbison3 gperf -y --no-progress
+          refreshenv
+          ninja --version
+          win_flex --version
+          win_bison --version
+          gperf --version
 
-      - name: 上传最终SDK
-        uses: actions/upload-artifact@v4
+      # ---------- 下载源码 ----------
+      - name: Download Qt source
+        env:
+          VER: ${{ steps.resolve_version.outputs.version }}
+        shell: pwsh
+        run: |
+          $majorMinor = $env:VER.Substring(0, $env:VER.LastIndexOf('.'))
+          $url = "https://download.qt.io/official_releases/qt/$majorMinor/$env:VER/single/qt-everywhere-src-$env:VER.zip"
+          Write-Host "Downloading: $url"
+          Invoke-WebRequest -Uri $url -OutFile qt-src.zip
+          Expand-Archive -Path qt-src.zip -DestinationPath .
+          $folder = Get-ChildItem -Directory | Where-Object { $_.Name -like 'qt-everywhere-src-*' } | Select-Object -First 1
+          echo "SRC_DIR=$pwd\$folder" >> $env:GITHUB_ENV
+
+      # ---------- 配置 (static, release, /O2) ----------
+      - name: Configure Qt
+        shell: cmd
+        run: |
+          cd /d %SRC_DIR%
+          set "SKIP_ARGS="
+          if not "${{ inputs.modules_to_skip }}"=="" (
+            for %%i in (${{ inputs.modules_to_skip }}) do set "SKIP_ARGS=!SKIP_ARGS! -skip %%i"
+          )
+          call configure.bat ^
+            -static ^
+            -static-runtime ^
+            -release ^
+            -prefix "%QT_INSTALL_DIR%" ^
+            -opensource ^
+            -confirm-license ^
+            -nomake examples ^
+            -nomake tests ^
+            -platform win32-msvc ^
+            -mp ^
+            %SKIP_ARGS%
+        timeout-minutes: 10
+
+      # ---------- 编译 ----------
+      - name: Build Qt
+        shell: cmd
+        run: |
+          cd /d %SRC_DIR%
+          cmake --build . --parallel --target install
+        timeout-minutes: 460
+
+      # ---------- 收集所有 .lib 文件 ----------
+      - name: List all .lib files
+        id: list_libs
+        shell: pwsh
+        run: |
+          $libs = Get-ChildItem -Path "$env:QT_INSTALL_DIR\lib" -Filter *.lib -Recurse |
+                  ForEach-Object { $_.FullName }
+          $libsString = $libs -join "`n"
+          # 输出为多行字符串，供后续 action 使用
+          "lib_paths<<EOF" >> $env:GITHUB_OUTPUT
+          $libsString >> $env:GITHUB_OUTPUT
+          "EOF" >> $env:GITHUB_OUTPUT
+          Write-Host "Found $($libs.Count) library files."
+
+      # ---------- 逐个上传到 Release ----------
+      - name: Upload each .lib to Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: Qt-6.10.3-Static-Full
-          path: Qt-6.10.3-Static-Full.7z
+          tag_name: qt-static-${{ steps.resolve_version.outputs.version }}
+          name: Qt ${{ steps.resolve_version.outputs.version }} Static Libraries (MSVC 2022 x64)
+          body: |
+            Static `.lib` files compiled from Qt ${{ steps.resolve_version.outputs.version }} source.
+            - **Platform**: Windows x64
+            - **Compiler**: MSVC 2022 (Visual Studio 2022)
+            - **Configuration**: static, release, static-runtime (/MT), /O2 optimization
+            - **Included modules**: all (unless skipped manually)
+            Each `.lib` is uploaded individually (no archive).
+          files: ${{ steps.list_libs.outputs.lib_paths }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
