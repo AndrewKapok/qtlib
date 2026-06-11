@@ -74,9 +74,15 @@ jobs:
           $majorMinor = $env:VER.Substring(0, $env:VER.LastIndexOf('.'))
           $url = "https://download.qt.io/official_releases/qt/$majorMinor/$env:VER/single/qt-everywhere-src-$env:VER.zip"
           Write-Host "Downloading: $url (using aria2c with 8 connections)"
-          aria2c -x 8 -s 8 --summary-interval=30 -o qt-src.zip $url
-          Write-Host "Download completed. Unzipping..."
-          Expand-Archive -Path qt-src.zip -DestinationPath .
+          Remove-Item -Force qt-src.zip -ErrorAction SilentlyContinue
+          aria2c -x 8 -s 8 --summary-interval=30 --allow-overwrite=true "$url"
+          $zipFile = Get-ChildItem -Filter "qt-everywhere-src-*.zip" | Select-Object -First 1
+          if (-not $zipFile) {
+          Write-Error "Downloaded Qt source zip not found!"
+          exit 1
+          }
+          Write-Host "Found zip: $($zipFile.Name)"
+          Expand-Archive -Path $zipFile.FullName -DestinationPath .
           $folder = Get-ChildItem -Directory | Where-Object { $_.Name -like 'qt-everywhere-src-*' } | Select-Object -First 1
           echo "SRC_DIR=$pwd\$folder" >> $env:GITHUB_ENV
 
