@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       qt_version:
-        description: 'Qt 版本号 (例如: 6.8.2, 5.15.16)'
+        description: 'Qt 版本号 (例如: v6.8.2, v5.15.16-lts)'
         required: true
-        default: '6.8.2'
+        default: 'v6.8.2'
         type: string
       qt_module_subset:
-        description: '子模块范围 (留空=全部, qtbase, essential, addon, 或自定义)'
+        description: '子模块范围 (留空=全部, qtbase, essential, addon)'
         required: false
         default: 'essential'
         type: string
@@ -27,17 +27,15 @@ jobs:
       QT_SRC_DIR: ${{ github.workspace }}/qt-src
       QT_BUILD_DIR: ${{ github.workspace }}/qt-build
       QT_INSTALL_DIR: ${{ github.workspace }}/qt-install
-      MSVC_ARCH: x64
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ========== 1. 安装编译依赖 ==========
-      - name: Install dependencies (Python, Ninja, Perl)
+      # ========== 安装依赖 ==========
+      - name: Install build dependencies
         run: |
           choco install python ninja strawberryperl -y --no-progress
-          # 添加到 PATH (Python, Perl)
           echo "C:\Program Files\Python3\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "C:\Program Files\Python3" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -52,31 +50,40 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # ========== 2. 克隆 Qt 源码 ==========
-      - name: Clone Qt source
+      # ========== 克隆 Qt 源码（包含所有子模块）==========
+      - name: Clone Qt source with submodules
         run: |
-          git clone --branch v${{ inputs.qt_version }} --depth 1 https://code.qt.io/qt/qt5.git ${{ env.QT_SRC_DIR }}
+          git clone --branch ${{ inputs.qt_version }} --depth 1 --recursive https://code.qt.io/qt/qt5.git ${{ env.QT_SRC_DIR }}
         shell: pwsh
 
-      # ========== 3. 初始化子模块 (修复 else 语法错误) ==========
-      - name: Initialize submodules
+      # ========== 准备子模块过滤（根据用户选择的模块集删除不需要的子模块）==========
+      # 注意：如果不做过滤，所有子模块都会被克隆，但编译时可以通过 -skip 跳过，也可以在此删除不需要的子模块目录以节省空间
+      - name: Remove unwanted modules (optional)
+        if: inputs.qt_module_subset != ''
         working-directory: ${{ env.QT_SRC_DIR }}
         run: |
+          # 定义保留模块列表
+          $modulesToKeep = @()
           $subset = "${{ inputs.qt_module_subset }}"
-          if ($subset -eq "") {
-            perl init-repository --no-update
-          } elseif ($subset -eq "qtbase") {
-            perl init-repository --module-subset=qtbase --no-update
+          if ($subset -eq "qtbase") {
+            $modulesToKeep = @("qtbase")
           } elseif ($subset -eq "essential") {
-            perl init-repository --module-subset=essential --no-update
+            $modulesToKeep = @("qtbase", "qtsvg", "qttools", "qttranslations", "qtdeclarative", "qtxmlpatterns")
           } elseif ($subset -eq "addon") {
-            perl init-repository --module-subset=addon --no-update
-          } else {
-            perl init-repository --module-subset=$subset --no-update
+            $modulesToKeep = @("qtbase", "qtsvg", "qttools", "qttranslations", "qtdeclarative", "qtxmlpatterns",
+                               "qtimageformats", "qtmultimedia", "qtserialport", "qtwebsockets", "qtscript")
+          }
+          # 删除不在保留列表中的模块目录
+          Get-ChildItem -Directory -Exclude ".git" | ForEach-Object {
+            if ($modulesToKeep -notcontains $_.Name) {
+              Write-Host "Removing unwanted module: $($_.Name)"
+              Remove-Item -Recurse -Force $_.FullName
+              # 同时从 .gitmodules 中注释掉，避免 configure 尝试构建
+            }
           }
         shell: pwsh
 
-      # ========== 4. 配置编译 (静态库 + O2 优化) ==========
+      # ========== 配置编译（静态库 + O2 优化）==========
       - name: Configure Qt
         working-directory: ${{ env.QT_BUILD_DIR }}
         run: |
@@ -102,19 +109,19 @@ jobs:
             -confirm-license
         shell: pwsh
 
-      # ========== 5. 编译 ==========
+      # ========== 编译 ==========
       - name: Build Qt
         working-directory: ${{ env.QT_BUILD_DIR }}
         run: |
           cmake --build . --parallel --config Release
 
-      # ========== 6. 安装 ==========
+      # ========== 安装 ==========
       - name: Install Qt
         working-directory: ${{ env.QT_BUILD_DIR }}
         run: |
           cmake --install . --config Release
 
-      # ========== 7. 收集所有 .lib 文件 ==========
+      # ========== 收集所有 .lib 文件 ==========
       - name: Collect lib files
         working-directory: ${{ env.QT_INSTALL_DIR }}
         run: |
@@ -139,13 +146,13 @@ jobs:
           Write-Host "文件总数: $((Get-ChildItem ${{ github.workspace }}/qt-libs -File).Count)"
         shell: pwsh
 
-      # ========== 8. 打包头文件 ==========
+      # ========== 打包头文件 ==========
       - name: Package includes
         run: |
           Compress-Archive -Path "${{ env.QT_INSTALL_DIR }}/include/*" -DestinationPath "${{ github.workspace }}/qt-libs/include.zip" -Force
         shell: pwsh
 
-      # ========== 9. 上传到 GitHub Release ==========
+      # ========== 上传到 GitHub Release ==========
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v1
         with:
