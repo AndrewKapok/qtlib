@@ -93,9 +93,12 @@ jobs:
           Write-Host "Extracting with 7z (multi-threaded)..."
           7z x "$($zipFile.FullName)" "-o." -y
 
-          # 定位源码目录
-          $folder = Get-ChildItem -Directory | Where-Object { $_.Name -like 'qt-everywhere-src-*' } | Select-Object -First 1
-          echo "SRC_DIR=$pwd\$folder" >> $env:GITHUB_ENV
+          $srcFolder = Get-ChildItem -Directory | Where-Object { $_.Name -like 'qt-everywhere-src-*' } | Select-Object -First 1
+          if (-not $srcFolder) {
+            Write-Error "Qt source directory not found after extraction"
+            exit 1
+          }
+          echo "SRC_DIR=$($srcFolder.FullName)" >> $env:GITHUB_ENV
 
       # ---------- 配置 (static, release, /O2) ----------
       - name: Configure Qt
